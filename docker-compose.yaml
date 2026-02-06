@@ -1,0 +1,9 @@
+services:
+
+  app:
+    build: .
+    container_name: app
+    volumes:
+      - .:/app
+    tty: true
+    command: /bin/bash
