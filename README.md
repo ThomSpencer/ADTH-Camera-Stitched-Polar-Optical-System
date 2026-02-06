@@ -67,7 +67,7 @@ Note: The example scripts demonstrate sensor capture, stitching and offline eval
 ## Authors
 - Thom Spencer
 - Anthony Bebek
-- Minh Nguien
+- Minh Nguyen
 
 ## License
 
