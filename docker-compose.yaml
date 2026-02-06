@@ -5,5 +5,14 @@ services:
     container_name: app
     volumes:
       - .:/app
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
     tty: true
     command: /bin/bash
+    devices:
+      - /dev/video0:/dev/video0
+      - /dev/video3:/dev/video3
+      - /dev/video5:/dev/video5
+    privileged: true
