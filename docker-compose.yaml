@@ -15,4 +15,5 @@ services:
       - /dev/video0:/dev/video0
       - /dev/video3:/dev/video3
       - /dev/video5:/dev/video5
+      - /dev/ttyACM0:/dev/ttyACM0
     privileged: true
