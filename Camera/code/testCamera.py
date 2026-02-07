@@ -2,7 +2,8 @@ import cv2  # type: ignore
 import numpy as np # type: ignore
 
 # Update these indices based on `v4l2-ctl --list-devices`
-CAMERA_INDICES = ["/dev/video2", "/dev/video4", "/dev/video0"]
+#CAMERA_INDICES = ["/dev/video2", "/dev/video4", "/dev/video0"]
+CAMERA_INDICES = ["/dev/video10"]
 TARGET_FPS = 30
 FRAME_SIZE = (1080, 720)
 FOURCC = "MJPG"

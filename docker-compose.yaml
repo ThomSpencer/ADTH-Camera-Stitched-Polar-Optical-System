@@ -11,9 +11,12 @@ services:
       - QT_X11_NO_MITSHM=1
     tty: true
     command: /bin/bash
+    group_add:
+      - video
     devices:
       - /dev/video0:/dev/video0
       - /dev/video3:/dev/video3
       - /dev/video5:/dev/video5
       - /dev/ttyACM0:/dev/ttyACM0
+      - /dev/video10:/dev/video10
     privileged: true

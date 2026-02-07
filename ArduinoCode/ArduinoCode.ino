@@ -27,7 +27,7 @@ int baseYPos = 90;
 
 void setup() {
   //Serial
-  Serial.begin(9600);
+  Serial.begin(115200);
 
   //Pinmodes
   pinMode(LASER_PIN, OUTPUT);

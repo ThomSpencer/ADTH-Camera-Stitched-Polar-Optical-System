@@ -4,6 +4,11 @@ os.environ.setdefault("QT_QPA_FONTDIR", "/usr/share/fonts")
 
 import cv2  # type: ignore
 import numpy as np
+import math
+import time
+import threading
+from queue import Queue, Empty
+import serial  # type: ignore
 
 
 # Update these indices based on `v4l2-ctl --list-devices`
@@ -49,8 +54,35 @@ ENABLE_BLENDING = True
 # AprilTag detection settings
 APRILTAG_DICT = cv2.aruco.DICT_APRILTAG_36h11
 TAG_SIZE_MM = 160.0
-TEXT_COLOR = (20, 220, 20)
+TEXT_COLOR = (50, 220, 20)
 OUTLINE_COLOR = (0, 200, 255)
+
+# Arduino / 2-DOF arm settings
+ENABLE_SERIAL = True
+SERIAL_PORT = "/dev/ttyACM0"
+SERIAL_BAUD = 115200
+SERIAL_TIMEOUT_S = 0.05
+TRACKED_TAG_IDS = (0, 1)
+ACTIVE_TAG_INDEX = 0
+TARGET_TAG_ID = TRACKED_TAG_IDS[ACTIVE_TAG_INDEX]
+MAX_SEND_HZ = 20.0
+TAG_HOLD_SEC = 1.0  # keep aiming at last seen tag for this long
+
+# Arm geometry and servo mapping
+# Coordinate frame: +Z forward (camera facing), +X up, +Y right.
+# The tag position is in the reference camera frame (mm).
+CAMERA_TO_BASE_MM = np.array([0.0, 0.0, -150.0], dtype=np.float32)
+BASE_TO_SERVO_MM = np.array([150.0, 0.0, 50.0], dtype=np.float32)
+SERVO_TO_LASER_MM = np.array([0.0, 0.0, 80.0], dtype=np.float32)
+
+# Base rotates about X ("yaw" here), servo rotates about Y ("pitch")
+SERVO_ZERO_ANGLES = (90.0, 90.0)  # (yaw, pitch)
+SERVO_LIMITS = ((0.0, 180.0), (0.0, 130.0))
+SERVO_DIRECTIONS = (-1.0, 1.0)  # flip sign if movement is reversed
+LASER_TRIM_DEG = (-5, 6.75)  # (yaw_trim, pitch_trim) in degrees
+SERVO_SWAP_AXES = True  # set True if left/right moves the tilt servo
+SERVO_SCALE = (1, 1.34)  # (yaw_scale, pitch_scale)
+
 
 
 def read_frame_with_retries(cap, retries=1):
@@ -138,7 +170,145 @@ def _warp_points(points: np.ndarray, H: np.ndarray) -> np.ndarray:
 	return cv2.perspectiveTransform(points, H)
 
 
+def _open_serial():
+	if not ENABLE_SERIAL:
+		return None
+	try:
+		ser = serial.Serial(
+			SERIAL_PORT,
+			SERIAL_BAUD,
+			timeout=SERIAL_TIMEOUT_S,
+			write_timeout=SERIAL_TIMEOUT_S,
+		)
+		ser.reset_input_buffer()
+		ser.reset_output_buffer()
+		return ser
+	except serial.SerialException as exc:
+		print(f"Serial open failed: {exc}")
+		return None
+
+
+def _clamp(value: float, min_val: float, max_val: float) -> float:
+	return max(min_val, min(max_val, value))
+
+
+def _angles_from_xyz(tag_pos_mm: np.ndarray):
+	def _compute_yaw_pitch(direction: np.ndarray) -> tuple[float, float]:
+		if np.linalg.norm(direction) < 1e-6:
+			return 0.0, 0.0
+		d = direction / np.linalg.norm(direction)
+		yaw = -math.asin(_clamp(float(d[1]), -1.0, 1.0))
+		pitch = math.atan2(float(d[0]), float(d[2]))
+		return yaw, pitch
+
+	def _rot_x(angle: float) -> np.ndarray:
+		c = math.cos(angle)
+		s = math.sin(angle)
+		return np.array([[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]], dtype=np.float32)
+
+	def _rot_y(angle: float) -> np.ndarray:
+		c = math.cos(angle)
+		s = math.sin(angle)
+		return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]], dtype=np.float32)
+
+	base_pos = CAMERA_TO_BASE_MM.astype(np.float32)
+	servo_pos = base_pos + BASE_TO_SERVO_MM.astype(np.float32)
+	initial_dir = tag_pos_mm.astype(np.float32) - servo_pos
+
+	# First pass: estimate yaw/pitch from servo pivot to tag
+	yaw, pitch = _compute_yaw_pitch(initial_dir)
+	R = _rot_y(pitch) @ _rot_x(yaw)
+	laser_pos = servo_pos + R @ SERVO_TO_LASER_MM.astype(np.float32)
+	refined_dir = tag_pos_mm.astype(np.float32) - laser_pos
+
+	# Second pass: refine using laser emitter position
+	yaw, pitch = _compute_yaw_pitch(refined_dir)
+	yaw_deg = math.degrees(yaw) * SERVO_SCALE[0]
+	pitch_deg = math.degrees(pitch) * SERVO_SCALE[1]
+
+	if SERVO_SWAP_AXES:
+		pan = SERVO_ZERO_ANGLES[0] + SERVO_DIRECTIONS[0] * pitch_deg + LASER_TRIM_DEG[0]
+		tilt = SERVO_ZERO_ANGLES[1] + SERVO_DIRECTIONS[1] * yaw_deg + LASER_TRIM_DEG[1]
+		pan_limits = SERVO_LIMITS[0]
+		tilt_limits = SERVO_LIMITS[1]
+	else:
+		pan = SERVO_ZERO_ANGLES[0] + SERVO_DIRECTIONS[0] * yaw_deg + LASER_TRIM_DEG[0]
+		tilt = SERVO_ZERO_ANGLES[1] + SERVO_DIRECTIONS[1] * pitch_deg + LASER_TRIM_DEG[1]
+		pan_limits = SERVO_LIMITS[0]
+		tilt_limits = SERVO_LIMITS[1]
+
+	pan = _clamp(pan, pan_limits[0], pan_limits[1])
+	tilt = _clamp(tilt, tilt_limits[0], tilt_limits[1])
+	return int(round(pan)), int(round(tilt))
+
+
+class _SerialSender:
+	def __init__(self, ser: serial.Serial, max_hz: float):
+		self._ser = ser
+		self._max_hz = max_hz
+		self._queue: Queue[str] = Queue(maxsize=1)
+		self._stop = threading.Event()
+		self._thread = threading.Thread(target=self._run, daemon=True)
+		self._last_send_time = 0.0
+		self._last_error_time = 0.0
+
+	def start(self) -> None:
+		self._thread.start()
+
+	def stop(self) -> None:
+		self._stop.set()
+		self._thread.join(timeout=1.0)
+		try:
+			if self._ser is not None:
+				self._ser.close()
+		except serial.SerialException:
+			pass
+
+	def send(self, cmd: str) -> None:
+		if self._stop.is_set():
+			return
+		try:
+			if self._queue.full():
+				_ = self._queue.get_nowait()
+			self._queue.put_nowait(cmd)
+		except Exception:
+			pass
+
+	def _run(self) -> None:
+		interval = 1.0 / self._max_hz if self._max_hz > 0 else 0.0
+		while not self._stop.is_set():
+			if self._ser is None:
+				self._ser = _open_serial()
+				if self._ser is None:
+					time.sleep(0.5)
+					continue
+				print("Serial reconnected")
+			try:
+				cmd = self._queue.get(timeout=0.1)
+			except Empty:
+				continue
+
+			now = time.time()
+			if interval > 0 and now - self._last_send_time < interval:
+				time.sleep(max(0.0, interval - (now - self._last_send_time)))
+			try:
+				self._ser.write(cmd.encode("utf-8"))
+				self._last_send_time = time.time()
+			except serial.SerialException:
+				try:
+					self._ser.close()
+				except serial.SerialException:
+					pass
+				self._ser = None
+				now = time.time()
+				if now - self._last_error_time > 2.0:
+					print("Serial write failed, retrying...")
+					self._last_error_time = now
+
+
 def main() -> None:
+	global ACTIVE_TAG_INDEX
+	global TARGET_TAG_ID
 	cameras = open_cameras(CAMERA_INDICES)
 	if len(cameras) != len(CAMERA_INDICES):
 		print("Not all cameras could be opened.")
@@ -228,6 +398,12 @@ def main() -> None:
 		blender.prepare((0, 0, CANVAS_SIZE[0], CANVAS_SIZE[1]))
 
 	zero_dist = np.zeros((5, 1), dtype=np.float32)
+	serial_conn = _open_serial()
+	serial_sender = _SerialSender(serial_conn, MAX_SEND_HZ) if serial_conn else None
+	if serial_sender is not None:
+		serial_sender.start()
+	last_tag_pos_ref = None
+	last_tag_seen_time = 0.0
 
 	cv2.namedWindow("Stitched", cv2.WINDOW_NORMAL)
 
@@ -360,13 +536,40 @@ def main() -> None:
 				poly = corners_warped.astype(int).reshape((-1, 1, 2))
 				cv2.polylines(result, [poly], True, OUTLINE_COLOR, 2)
 
+			# Update last seen tag
+			if tracked_tags:
+				tag_to_track = None
+				if TARGET_TAG_ID is not None:
+					for tag in tracked_tags:
+						if tag["id"] == TARGET_TAG_ID:
+							tag_to_track = tag
+							break
+				if tag_to_track is None:
+					tag_to_track = tracked_tags[0]
+				last_tag_pos_ref = tag_to_track["pos_ref"]
+				last_tag_seen_time = time.time()
+
+			# Send command to Arduino for the selected tag (or recent last tag)
+			if serial_sender is not None and last_tag_pos_ref is not None:
+				if tracked_tags or (time.time() - last_tag_seen_time) <= TAG_HOLD_SEC:
+					pan, tilt = _angles_from_xyz(last_tag_pos_ref)
+					cmd = f"MOVE {pan} {tilt}\n"
+					serial_sender.send(cmd)
+
 			cv2.imshow("Stitched", result)
 
-			if cv2.waitKey(1) & 0xFF == ord("q"):
+			key = cv2.waitKey(1) & 0xFF
+			if key == ord("q"):
 				break
+			if key == ord(" "):
+				ACTIVE_TAG_INDEX = (ACTIVE_TAG_INDEX + 1) % len(TRACKED_TAG_IDS)
+				TARGET_TAG_ID = TRACKED_TAG_IDS[ACTIVE_TAG_INDEX]
+				print(f"Tracking tag ID {TARGET_TAG_ID}")
 	finally:
 		for _, cap in cameras:
 			cap.release()
+		if serial_sender is not None:
+			serial_sender.stop()
 		cv2.destroyAllWindows()
 
 

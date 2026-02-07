@@ -117,7 +117,8 @@ if __name__ == "__main__":
         cv2.waitKey(0)
         cv2.destroyAllWindows()
         
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture("/dev/video10")
+    #cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("Unable to open cam")
     else:

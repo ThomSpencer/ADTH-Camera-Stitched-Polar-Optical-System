@@ -2,3 +2,6 @@ pyserial
 opencv-contrib-python
 stitching
 numpy
+pyvirtualcam
+sympy
+ultralytics
