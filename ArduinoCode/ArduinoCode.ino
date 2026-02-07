@@ -4,12 +4,22 @@
 #define X_SERVO_PIN 3
 #define Y_SERVO_PIN 11
 
+
+#define StaticServoA 4
+#define StaticServoB 5
+#define StaticServoC 6
+
 // Setup laser pinout
 #define LASER_PIN 12
 
 // Define Servo objects
 Servo xServo;
 Servo yServo;
+
+Servo staticServoA;
+Servo staticServoB;
+Servo staticServoC;
+
 
 // Setup position variables
 int baseXPos = 90;
@@ -22,6 +32,18 @@ void setup() {
   //Pinmodes
   pinMode(LASER_PIN, OUTPUT);
   digitalWrite(LASER_PIN, HIGH); // Ensure laser is on
+
+  pinMode(StaticServoA, OUTPUT);
+  staticServoB.attach(StaticServoA);
+  staticServoB.write(180);
+
+  pinMode(StaticServoB, OUTPUT);
+  staticServoB.attach(StaticServoB);
+  staticServoB.write(130);
+
+  pinMode(StaticServoC, OUTPUT);
+  staticServoC.attach(StaticServoC);
+  staticServoC.write(30);
 
   xServo.attach(X_SERVO_PIN);
   yServo.attach(Y_SERVO_PIN);
