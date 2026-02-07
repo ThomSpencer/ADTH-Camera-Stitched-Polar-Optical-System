@@ -1,7 +1,7 @@
 import cv2  # type: ignore
 
 # Update these indices based on `v4l2-ctl --list-devices`
-CAMERA_INDICES = ["/dev/video0", "/dev/video5", "/dev/video3"]
+CAMERA_INDICES = ["/dev/video2", "/dev/video4", "/dev/video0"]
 TARGET_FPS = 30
 FRAME_SIZE = (640, 480)
 FOURCC = "MJPG"
@@ -35,14 +35,6 @@ def open_cameras(indices):
 		print(f"Successfully opened camera index {idx}")
 	return opened
 
-
-def create_stitcher():
-	try:
-		return cv2.Stitcher_create()
-	except AttributeError:
-		return cv2.Stitcher.create()
-
-
 def draw_center_dot(frame, color=(0, 0, 255), radius=6, thickness=-1):
 	h, w = frame.shape[:2]
 	center = (w // 2, h // 2)
@@ -59,7 +51,7 @@ def main() -> None:
 
 	cv2.namedWindow("Stitched", cv2.WINDOW_NORMAL)
 
-	stitcher = create_stitcher()
+	stitcher = cv2.Stitcher_create(mode=cv2.Stitcher_PANORAMA)
 
 	try:
 		while True:
@@ -78,8 +70,13 @@ def main() -> None:
 			resized = [cv2.resize(frame, FRAME_SIZE) for frame in frames]
 			for frame in resized:
 				draw_center_dot(frame)
-            
-			status, stitched = stitcher.stitch(resized)
+
+			try:
+				status, stitched = stitcher.stitch(resized)
+			except cv2.error as exc:
+				print(f"Stitcher error: {exc}")
+				status, stitched = None, None
+
 			if status == cv2.Stitcher_OK and stitched is not None:
 				cv2.imshow("Stitched", stitched)
 			else:

@@ -7,6 +7,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
                 wget \
                 git \
                 docker.io \
+                fontconfig \
+                fonts-dejavu-core \
+                libgtk-3-0 \
+                libgtk-3-dev \
                 libgl1 \
                 libglib2.0-0 \
                 libx11-6 \
@@ -21,8 +25,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
                 libxrandr2 \
                 libxi6 \
                 libxinerama1 \
+                pkg-config \
                 v4l-utils \
         && rm -rf /var/lib/apt/lists/*
+
+ENV QT_QPA_FONTDIR=/usr/share/fonts/truetype/dejavu
 
 WORKDIR /app
 
