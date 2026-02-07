@@ -123,21 +123,59 @@ if __name__ == "__main__":
     else:
         webcamModel = YOLO(str(bestWeights))
         print("Webcam drone detection. Press q to exit")
+        cv2.namedWindow("Drone detection", cv2.WINDOW_NORMAL)
+        cv2.setWindowProperty("Drone detection", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+        
+        smoothed = None
+        lastConf = 0.0
+        alpha = 0.4
+        
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
-            results = webcamModel.predict(
-                frame,
-                conf=0.25,
-                verbose=False,
-            )
-            if results and len(results) > 0:
-                annotated = results[0].plot()
-            else:
-                annotated = frame
-            cv2.imshow("Drone detection", annotated)
+
+            results = webcamModel.predict(frame, conf=0.2, verbose=False)
+            det = None
+            if results and len(results) > 0 and results[0].boxes is not None and len(results[0].boxes) > 0:
+                boxes = results[0].boxes
+                # pick best: highest confidence
+                idx = boxes.conf.argmax().item()
+                xyxy = boxes.xyxy[idx].cpu().numpy()
+                conf = float(boxes.conf[idx])
+                x1, y1, x2, y2 = xyxy[0], xyxy[1], xyxy[2], xyxy[3]
+                cx = (x1 + x2) / 2
+                cy = (y1 + y2) / 2
+                w, h = x2 - x1, y2 - y1
+                det = (cx, cy, w, h, conf)
+
+            if det is not None:
+                cx, cy, w, h, conf = det
+                if smoothed is None:
+                    smoothed = (cx, cy, w, h)
+                else:
+                    scx, scy, sw, sh = smoothed
+                    smoothed = (
+                        alpha * cx + (1 - alpha) * scx,
+                        alpha * cy + (1 - alpha) * scy,
+                        alpha * w + (1 - alpha) * sw,
+                        alpha * h + (1 - alpha) * sh,
+                    )
+                last_conf = conf
+            # else: keep previous smoothed (and last_conf) so path doesn't vanish
+
+            if smoothed is not None:
+                scx, scy, sw, sh = smoothed
+                x1 = int(scx - sw / 2)
+                y1 = int(scy - sh / 2)
+                x2 = int(scx + sw / 2)
+                y2 = int(scy + sh / 2)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(frame, f"drone {last_conf:.2f}", (x1, y1 - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            cv2.imshow("Drone detection", frame)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
+        
         cap.release()
         cv2.destroyAllWindows()
