@@ -4,6 +4,7 @@ os.environ.setdefault("QT_QPA_FONTDIR", "/usr/share/fonts")
 
 import cv2  # type: ignore
 import numpy as np
+import math
 try:
 	import pyvirtualcam
 except Exception:  # pragma: no cover
@@ -39,6 +40,22 @@ CAMERA_ROTATE_DEG = {
 	"cam0": 4.75,
 	"cam1": 0.0,
 	"cam2": 0.0,
+}
+
+# Manual tilt per camera in degrees (positive = pitch up, negative = pitch down).
+# Use this if a camera is physically leaning forward/back.
+CAMERA_TILT_DEG = {
+	"cam0": 0.0,
+	"cam1": 0.0,
+	"cam2": 0.0,
+}
+
+# Optional per-camera crop margins (left, right, top, bottom) in pixels.
+# Use this to trim distorted edges before warping.
+CAMERA_CROP_PX = {
+	"cam0": (0, 0, 0, 0),
+	"cam1": (0, 0, 0, 0),
+	"cam2": (0, 0, 0, 0),
 }
 
 # Optional crop margins on the final output: (left, right, top, bottom)
@@ -268,7 +285,19 @@ def main() -> None:
 		if R is None or T is None:
 			print(f"Missing rotation for {cam_name} -> {REFERENCE_CAMERA_NAME}.")
 			continue
-		H = K_ref @ (R + (T @ plane_normal.T) / SCENE_DEPTH_MM) @ np.linalg.inv(K_cam)
+		tilt_deg = CAMERA_TILT_DEG.get(cam_name, 0.0)
+		if tilt_deg:
+			rad = math.radians(tilt_deg)
+			c = math.cos(rad)
+			s = math.sin(rad)
+			R_tilt = np.array(
+				[[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]],
+				dtype=np.float32,
+			)
+			R_use = R @ R_tilt
+		else:
+			R_use = R
+		H = K_ref @ (R_use + (T @ plane_normal.T) / SCENE_DEPTH_MM) @ np.linalg.inv(K_cam)
 		rot_deg = CAMERA_ROTATE_DEG.get(cam_name, 0.0)
 		if rot_deg:
 			rot2 = cv2.getRotationMatrix2D(
@@ -342,7 +371,24 @@ def main() -> None:
 				H = homographies.get(cam_name)
 				if H is None:
 					continue
-				warped = cv2.warpPerspective(frame, H, CANVAS_SIZE)
+				crop_left, crop_right, crop_top, crop_bottom = CAMERA_CROP_PX.get(
+					cam_name, (0, 0, 0, 0)
+				)
+				h, w = frame.shape[:2]
+				x0 = min(max(crop_left, 0), w)
+				x1 = max(min(w - crop_right, w), x0)
+				y0 = min(max(crop_top, 0), h)
+				y1 = max(min(h - crop_bottom, h), y0)
+				if x0 != 0 or y0 != 0 or x1 != w or y1 != h:
+					frame = frame[y0:y1, x0:x1]
+					T_crop = np.array(
+						[[1.0, 0.0, float(x0)], [0.0, 1.0, float(y0)], [0.0, 0.0, 1.0]],
+						dtype=np.float32,
+					)
+					H_use = H @ T_crop
+				else:
+					H_use = H
+				warped = cv2.warpPerspective(frame, H_use, CANVAS_SIZE)
 				mask = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
 				_, mask = cv2.threshold(mask, 1, 255, cv2.THRESH_BINARY)
 				warped_images.append(warped)
