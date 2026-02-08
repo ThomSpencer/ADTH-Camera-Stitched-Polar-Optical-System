@@ -13,7 +13,6 @@ from ultralytics import YOLO
 from PIL import Image
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print("This model is using:", device)
 
 DATA_PATH = r"drone_dataset"
 datasetPath = Path(DATA_PATH)
@@ -71,6 +70,7 @@ trainLoader = DataLoader(trainDS, batch_size=16, shuffle=True, num_workers=0, pi
 valLoader = DataLoader(valDS, batch_size=16, shuffle=False, num_workers=0)
 
 if __name__ == "__main__":
+    print("This model is using: ", device)
     print(f"Data.yaml path: {DATA_YAML}")
     if SAVED_WEIGHTS.exists():
         print(f"using saved model: {SAVED_WEIGHTS}")
@@ -78,10 +78,11 @@ if __name__ == "__main__":
         bestWeights = SAVED_WEIGHTS
     else:
         print("No saved model found. Training.")
-        model = YOLO("yolov8n.pt")
+        model = YOLO("yolo26n.pt")
         results = model.train(
             data = str(DATA_YAML),
             epochs = 50,
+            patience = 15,
             imgsz = 640,
             batch = 16,
             device = "cuda:0",
@@ -117,8 +118,8 @@ if __name__ == "__main__":
         cv2.waitKey(0)
         cv2.destroyAllWindows()
         
-    cap = cv2.VideoCapture("/dev/video10")
-    #cap = cv2.VideoCapture(0)
+    #cap = cv2.VideoCapture("/dev/video10")
+    cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("Unable to open cam")
     else:
