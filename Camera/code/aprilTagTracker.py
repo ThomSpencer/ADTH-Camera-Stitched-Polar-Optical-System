@@ -12,7 +12,7 @@ import serial  # type: ignore
 
 
 # Update these indices based on `v4l2-ctl --list-devices`
-CAMERA_INDICES = ["/dev/video2", "/dev/video4", "/dev/video0"]
+CAMERA_INDICES = ["/dev/video2", "/dev/video0", "/dev/video4"]
 TARGET_FPS = 30
 FRAME_SIZE = (1280, 720)
 FOURCC = "MJPG"
@@ -32,16 +32,32 @@ SCENE_DEPTH_MM = 10000.0
 # Manual trim offsets (pixels) applied after homography, per camera name.
 # Positive x moves left, positive y moves down.
 CAMERA_TRIM_OFFSETS_PX = {
-	"cam0": (0, 0),
+	"cam0": (0, -30),
 	"cam1": (0, 0),
-	"cam2": (0, 0),
+	"cam2": (8, -15),
 }
 
 # Manual rotation per camera in degrees (positive = counterclockwise).
 CAMERA_ROTATE_DEG = {
-	"cam0": 4.75,
+	"cam0": 0.0,
 	"cam1": 0.0,
 	"cam2": 0.0,
+}
+
+# Manual tilt per camera in degrees (positive = pitch up, negative = pitch down).
+# Use this if a camera is physically leaning forward/back.
+CAMERA_TILT_DEG = {
+	"cam0": -7.0,
+	"cam1": 0.0,
+	"cam2": 0.0,
+}
+
+# Optional per-camera crop margins (left, right, top, bottom) in pixels.
+# Use this to trim distorted edges before warping.
+CAMERA_CROP_PX = {
+	"cam0": (0, 200, 0, 0),
+	"cam1": (0, 0, 0, 0),
+	"cam2": (0, 0, 0, 0),
 }
 
 # Optional crop margins on the final output: (left, right, top, bottom)
@@ -366,7 +382,19 @@ def main() -> None:
 			print(f"Missing rotation for {cam_name} -> {REFERENCE_CAMERA_NAME}.")
 			continue
 		extrinsics_to_ref[cam_name] = (R, T)
-		H = K_ref @ (R + (T @ plane_normal.T) / SCENE_DEPTH_MM) @ np.linalg.inv(K_cam)
+		tilt_deg = CAMERA_TILT_DEG.get(cam_name, 0.0)
+		if tilt_deg:
+			rad = math.radians(tilt_deg)
+			c = math.cos(rad)
+			s = math.sin(rad)
+			R_tilt = np.array(
+				[[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]],
+				dtype=np.float32,
+			)
+			R_use = R @ R_tilt
+		else:
+			R_use = R
+		H = K_ref @ (R_use + (T @ plane_normal.T) / SCENE_DEPTH_MM) @ np.linalg.inv(K_cam)
 		rot_deg = CAMERA_ROTATE_DEG.get(cam_name, 0.0)
 		if rot_deg:
 			rot2 = cv2.getRotationMatrix2D(
@@ -444,6 +472,28 @@ def main() -> None:
 					continue
 				frame_undist = cv2.remap(frame, maps[0], maps[1], cv2.INTER_LINEAR)
 
+				crop_left, crop_right, crop_top, crop_bottom = CAMERA_CROP_PX.get(
+					cam_name, (0, 0, 0, 0)
+				)
+				h, w = frame_undist.shape[:2]
+				x0 = min(max(crop_left, 0), w)
+				x1 = max(min(w - crop_right, w), x0)
+				y0 = min(max(crop_top, 0), h)
+				y1 = max(min(h - crop_bottom, h), y0)
+				if x0 != 0 or y0 != 0 or x1 != w or y1 != h:
+					frame_undist = frame_undist[y0:y1, x0:x1]
+					K_cam = params["mtx"].copy()
+					K_cam[0, 2] -= float(x0)
+					K_cam[1, 2] -= float(y0)
+					T_crop = np.array(
+						[[1.0, 0.0, float(x0)], [0.0, 1.0, float(y0)], [0.0, 0.0, 1.0]],
+						dtype=np.float32,
+					)
+					H_use = H @ T_crop
+				else:
+					K_cam = params["mtx"]
+					H_use = H
+
 				if detector is not None:
 					marker_corners, marker_ids, _ = detector.detectMarkers(frame_undist)
 				else:
@@ -457,14 +507,14 @@ def main() -> None:
 					rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
 						marker_corners,
 						TAG_SIZE_MM,
-						params["mtx"],
+						K_cam,
 						zero_dist,
 					)
 					for i, marker_id in enumerate(marker_ids.flatten()):
 						corners_np = marker_corners[i].reshape(4, 2)
 						center = corners_np.mean(axis=0)
 						center_h = np.array([[center]], dtype=np.float32)
-						center_warped = _warp_points(center_h, H)[0, 0]
+						center_warped = _warp_points(center_h, H_use)[0, 0]
 
 						tvec = tvecs[i].reshape(3, 1)
 						tvec_ref = R_to_ref @ tvec + T_to_ref
@@ -474,11 +524,11 @@ def main() -> None:
 								"pos_ref": tvec_ref.flatten(),
 								"center": center_warped,
 								"corners": marker_corners[i],
-								"H": H,
+								"H": H_use,
 							}
 						)
 
-				warped = cv2.warpPerspective(frame_undist, H, CANVAS_SIZE)
+				warped = cv2.warpPerspective(frame_undist, H_use, CANVAS_SIZE)
 				mask = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
 				_, mask = cv2.threshold(mask, 1, 255, cv2.THRESH_BINARY)
 				warped_images.append(warped)

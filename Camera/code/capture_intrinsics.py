@@ -6,13 +6,13 @@ import cv2  # type: ignore
 import numpy as np # type: ignore
 
 # Update these indices based on `v4l2-ctl --list-devices`
-CAMERA_INDICES = ["/dev/video2", "/dev/video4", "/dev/video0"]
-FRAME_SIZE = (640, 480)
+CAMERA_INDICES = ["/dev/video2"]
+FRAME_SIZE = (1280, 720)
 TARGET_FPS = 30
 FOURCC = "MJPG"
 
 OUTPUT_ROOT = "calibration/intrinsics"
-CAMERA_NAMES = ["cam0", "cam1", "cam2"]
+CAMERA_NAMES = ["cam0"]
 
 
 def read_frame_with_retries(cap, retries=1):
