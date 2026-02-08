@@ -137,7 +137,7 @@ if __name__ == "__main__":
             if not ret:
                 break
 
-            results = webcamModel.predict(frame, conf=0.2, verbose=False)
+            results = webcamModel.predict(frame, conf=0.5, verbose=False)
             det = None
             if results and len(results) > 0 and results[0].boxes is not None and len(results[0].boxes) > 0:
                 boxes = results[0].boxes
@@ -146,10 +146,16 @@ if __name__ == "__main__":
                 xyxy = boxes.xyxy[idx].cpu().numpy()
                 conf = float(boxes.conf[idx])
                 x1, y1, x2, y2 = xyxy[0], xyxy[1], xyxy[2], xyxy[3]
-                cx = (x1 + x2) / 2
-                cy = (y1 + y2) / 2
+                #cx = (x1 + x2) / 2
+                #cy = (y1 + y2) / 2
                 w, h = x2 - x1, y2 - y1
-                det = (cx, cy, w, h, conf)
+                frame_h, frame_w = frame.shape[:2]
+                boxArea = w * h
+                frameArea = frame_w * frame_h
+                if boxArea < 0.4 * frameArea:
+                    cx = (x1 + x2) / 2
+                    cy = (y1 + y2) / 2
+                    det = (cx, cy, w, h, conf)
 
             if det is not None:
                 cx, cy, w, h, conf = det
