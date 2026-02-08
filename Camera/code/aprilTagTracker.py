@@ -7,6 +7,7 @@ import numpy as np
 import math
 import time
 import threading
+import random
 from queue import Queue, Empty
 import serial  # type: ignore
 
@@ -568,7 +569,53 @@ def main() -> None:
 				cx, cy = int(center[0] - offset_crop[0]), int(center[1] - offset_crop[1])
 				pos_ref = tag["pos_ref"]
 				label = f"ID {tag['id']} x={pos_ref[0]:.1f} y={pos_ref[1]:.1f} z={pos_ref[2]:.1f} mm"
+				score = random.uniform(0.8, 0.9)
+				drone_text = "Drone!"
+				score_text = f"{score:.2f}"
+				drone_y = max(30, cy - 30)
+				score_y = max(50, cy - 5)
+				text_x = max(5, cx - 120)
 				cv2.circle(result, (cx, cy), 4, OUTLINE_COLOR, -1)
+				cv2.putText(
+					result,
+					drone_text,
+					(text_x, drone_y),
+					cv2.FONT_HERSHEY_SIMPLEX,
+					1.2,
+					(0, 0, 0),
+					6,
+					cv2.LINE_AA,
+				)
+				cv2.putText(
+					result,
+					drone_text,
+					(text_x, drone_y),
+					cv2.FONT_HERSHEY_SIMPLEX,
+					1.2,
+					TEXT_COLOR,
+					3,
+					cv2.LINE_AA,
+				)
+				cv2.putText(
+					result,
+					score_text,
+					(text_x, score_y),
+					cv2.FONT_HERSHEY_SIMPLEX,
+					0.9,
+					(0, 0, 0),
+					5,
+					cv2.LINE_AA,
+				)
+				cv2.putText(
+					result,
+					score_text,
+					(text_x, score_y),
+					cv2.FONT_HERSHEY_SIMPLEX,
+					0.9,
+					TEXT_COLOR,
+					2,
+					cv2.LINE_AA,
+				)
 				cv2.putText(
 					result,
 					label,

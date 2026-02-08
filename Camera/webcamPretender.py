@@ -12,7 +12,7 @@ except Exception:  # pragma: no cover
 
 
 # Update these indices based on `v4l2-ctl --list-devices`
-CAMERA_INDICES = ["/dev/video2", "/dev/video4", "/dev/video0"]
+CAMERA_INDICES = ["/dev/video2", "/dev/video0","/dev/video4"]
 TARGET_FPS = 30
 FRAME_SIZE = (1280, 720)
 FOURCC = "MJPG"
@@ -28,16 +28,16 @@ CANVAS_SIZE = (FRAME_SIZE[0] * len(CAMERA_INDICES), FRAME_SIZE[1])
 # Approximate scene plane depth in mm for translation-aware homography.
 SCENE_DEPTH_MM = 10000.0
 
-# Manual trim offsets (pixels) applied after homography, per camera name.
+# Positive x moves left, positive y moves down.
 CAMERA_TRIM_OFFSETS_PX = {
-	"cam0": (0, 0),
+	"cam0": (0, -30),
 	"cam1": (0, 0),
-	"cam2": (0, 0),
+	"cam2": (8, -15),
 }
 
 # Manual rotation per camera in degrees (positive = counterclockwise).
 CAMERA_ROTATE_DEG = {
-	"cam0": 4.75,
+	"cam0": 0.0,
 	"cam1": 0.0,
 	"cam2": 0.0,
 }
@@ -45,7 +45,7 @@ CAMERA_ROTATE_DEG = {
 # Manual tilt per camera in degrees (positive = pitch up, negative = pitch down).
 # Use this if a camera is physically leaning forward/back.
 CAMERA_TILT_DEG = {
-	"cam0": 0.0,
+	"cam0": -7.0,
 	"cam1": 0.0,
 	"cam2": 0.0,
 }
@@ -53,7 +53,7 @@ CAMERA_TILT_DEG = {
 # Optional per-camera crop margins (left, right, top, bottom) in pixels.
 # Use this to trim distorted edges before warping.
 CAMERA_CROP_PX = {
-	"cam0": (0, 0, 0, 0),
+	"cam0": (0, 200, 0, 0),
 	"cam1": (0, 0, 0, 0),
 	"cam2": (0, 0, 0, 0),
 }
